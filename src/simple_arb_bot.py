@@ -129,6 +129,11 @@ class SimpleArbitrageBot:
         seconds = int(remaining % 60)
         return f"{minutes}m {seconds}s"
     
+    def get_balance(self) -> float:
+        """Get current USDC balance."""
+        from .trading import get_balance
+        return get_balance(self.settings)
+    
     def get_current_prices(self) -> tuple[Optional[float], Optional[float]]:
         """Obtener precios actuales de ambos lados."""
         try:
@@ -234,6 +239,16 @@ class SimpleArbitrageBot:
             self.positions.append(opportunity)
             return
         
+        # Verificar balance antes de ejecutar
+        logger.info("\nVerificando balance...")
+        current_balance = self.get_balance()
+        logger.info(f"Balance disponible: ${current_balance:.2f}")
+        
+        if current_balance < opportunity['total_investment']:
+            logger.error(f"❌ Balance insuficiente: necesitas ${opportunity['total_investment']:.2f} pero tienes ${current_balance:.2f}")
+            logger.error("No se ejecutará el arbitraje")
+            return
+        
         # Verificar spreads antes de ejecutar
         logger.info("\nVerificando spreads y liquidez...")
         up_book = self.get_order_book(self.yes_token_id)
@@ -286,8 +301,13 @@ class SimpleArbitrageBot:
             self.total_shares_bought += opportunity['order_size'] * 2  # UP + DOWN
             self.positions.append(opportunity)
             
+            # Mostrar balance actualizado
+            new_balance = self.get_balance()
+            logger.info(f"Balance actualizado: ${new_balance:.2f}")
+            
         except Exception as e:
             logger.error(f"\n❌ Error ejecutando arbitraje: {e}")
+            logger.error("❌ Las órdenes NO se ejecutaron - el tracking no se actualizó")
     
     def get_market_result(self) -> Optional[str]:
         """Obtener qué opción ganó el mercado."""

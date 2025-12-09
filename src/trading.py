@@ -1,9 +1,12 @@
 import functools
+import logging
 from typing import Optional
 
 from py_clob_client.client import ClobClient
 
 from .config import Settings
+
+logger = logging.getLogger(__name__)
 
 
 @functools.lru_cache(maxsize=1)
@@ -16,6 +19,21 @@ def get_client(settings: Settings) -> ClobClient:
     if not settings.private_key:
         raise RuntimeError("POLYMARKET_PRIVATE_KEY is required for trading")
     return _client("default", settings.private_key, settings.signature_type, settings.funder)
+
+
+def get_balance(settings: Settings) -> float:
+    """Get USDC balance from Polymarket account."""
+    try:
+        client = get_client(settings)
+        # Get balances - returns dict with token addresses as keys
+        balances = client.get_balance_allowance()
+        # USDC on Polygon address
+        usdc_address = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+        balance = float(balances.get(usdc_address, {}).get("balance", 0))
+        return balance
+    except Exception as e:
+        logger.error(f"Error getting balance: {e}")
+        return 0.0
 
 
 def place_order(settings: Settings, *, side: str, token_id: str, price: float, size: float, tif: str = "GTC") -> dict:
