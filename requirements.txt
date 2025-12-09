@@ -1,6 +1,8 @@
-websockets==12.0
-httpx==0.27.0
-python-dotenv==1.0.1
-beautifulsoup4==4.12.3
-pytest==8.3.3
+# Polymarket API client
 py-clob-client
+
+# HTTP client for market discovery and price fetching
+httpx==0.27.0
+
+# Environment configuration
+python-dotenv==1.0.1
