@@ -1,7 +1,7 @@
 """
-Diagnose wallet and API configuration issues.
+Check wallet and API configuration for the BTC 15m arbitrage bot.
 
-Run with: python -m src.diagnose_config
+Run with: python -m src.check_config
 """
 
 import os
@@ -13,7 +13,7 @@ load_dotenv(override=False)
 
 def main():
     print("=" * 70)
-    print("POLYMARKET BOT - CONFIGURATION DIAGNOSIS")
+    print("BTC 15M ARB BOT - CONFIGURATION CHECK")
     print("=" * 70)
     print()
 
@@ -93,7 +93,6 @@ def main():
         # 5. Try to check neg_risk detection for a sample token
         print("5. Testing neg_risk detection (for BTC 15min markets)...")
         try:
-            # Use a known BTC 15min token pattern - we'll try to fetch one
             import httpx
             import re
 
@@ -105,7 +104,7 @@ def main():
             pattern = r'btc-updown-15m-(\d+)'
             matches = re.findall(pattern, resp.text)
             if matches:
-                from .lookup import fetch_market_from_slug
+                from .market_lookup import fetch_market_from_slug
 
                 slug = f"btc-updown-15m-{matches[0]}"
                 market_info = fetch_market_from_slug(slug)
@@ -126,7 +125,7 @@ def main():
 
         # 6. Summary
         print("=" * 70)
-        print("DIAGNOSIS SUMMARY")
+        print("CONFIGURATION CHECK SUMMARY")
         print("=" * 70)
 
         issues = []
@@ -151,12 +150,12 @@ def main():
             print("✓ No obvious configuration issues detected.")
             print()
             print("If you still get 'invalid signature' errors:")
-            print("  1. Regenerate API credentials: python -m src.generate_api_key")
+            print("  1. Regenerate API credentials: python -m src.create_api_keys")
             print("  2. Verify POLYMARKET_FUNDER is your Polymarket proxy wallet address")
             print("  3. Check that your account has trading enabled on Polymarket")
 
     except Exception as e:
-        print(f"❌ Error during diagnosis: {e}")
+        print(f"❌ Error during check: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

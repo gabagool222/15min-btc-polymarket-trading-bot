@@ -1,8 +1,8 @@
 """
-Simple arbitrage bot for Bitcoin 15min markets following Jeremy Whittaker's strategy.
+BTC 15-minute arbitrage bot for Polymarket.
 
 Strategy: Buy both sides (UP and DOWN) when total cost < $1.00
-to guarantee profits regardless of the outcome.
+to lock in profit regardless of whether Bitcoin goes up or down.
 """
 
 import asyncio
@@ -15,7 +15,7 @@ from typing import Optional
 import httpx
 
 from .config import load_settings
-from .lookup import fetch_market_from_slug
+from .market_lookup import fetch_market_from_slug
 from .trading import (
     get_client,
     place_order,
@@ -39,48 +39,155 @@ logger.setLevel(logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
-def find_current_btc_15min_market() -> str:
+# 15min window length in seconds
+BTC_15M_WINDOW = 900
+
+
+def _find_btc_15m_via_computed_slugs() -> Optional[str]:
+    """
+    Try computed slugs for current and next 15m windows (reference: try event URLs).
+    Slug format: btc-updown-15m-{ts_rounded} where ts_rounded aligns to 15m boundaries.
+    """
+    now_ts = int(datetime.now().timestamp())
+    for i in range(7):
+        ts = now_ts + (i * BTC_15M_WINDOW)
+        ts_rounded = (ts // BTC_15M_WINDOW) * BTC_15M_WINDOW
+        slug = f"btc-updown-15m-{ts_rounded}"
+        try:
+            logger.info(f"  Checking: {slug}")
+            fetch_market_from_slug(slug)
+            # Market page exists and has valid data; use it if still open
+            if now_ts < ts_rounded + BTC_15M_WINDOW:
+                return slug
+            # Else market exists but closed, keep trying next window
+        except Exception:
+            continue
+    return None
+
+
+def _find_btc_15m_via_gamma_api() -> Optional[str]:
+    """Find BTC 15m slug from Polymarket Gamma API (closed=false markets)."""
+    try:
+        resp = httpx.get(
+            "https://gamma-api.polymarket.com/markets",
+            params={"closed": "false", "limit": 500},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if not isinstance(data, list):
+            return None
+        now_ts = int(datetime.now().timestamp())
+        pattern = re.compile(r"^btc-updown-15m-(\d+)$")
+        candidates = []
+        for m in data:
+            slug = (m.get("slug") or "").strip()
+            mo = pattern.match(slug)
+            if not mo:
+                continue
+            ts = int(mo.group(1))
+            if now_ts < ts + BTC_15M_WINDOW:
+                candidates.append((ts, slug))
+        if not candidates:
+            for m in data:
+                slug = (m.get("slug") or "").strip()
+                if pattern.match(slug):
+                    candidates.append((int(pattern.match(slug).group(1)), slug))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda x: (x[0] + BTC_15M_WINDOW > now_ts, x[0]), reverse=True)
+        return candidates[0][1]
+    except Exception as e:
+        logger.debug("Gamma API lookup failed: %s", e)
+        return None
+
+
+def _find_btc_15m_via_page_scrape() -> Optional[str]:
+    """Fallback: scrape crypto/15M page for btc-updown-15m slugs (HTML or __NEXT_DATA__)."""
+    try:
+        import json
+        resp = httpx.get(
+            "https://polymarket.com/crypto/15M",
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        text = resp.text
+        now_ts = int(datetime.now().timestamp())
+        pattern = re.compile(r"^btc-updown-15m-(\d+)$")
+        # Plain regex in HTML
+        matches = re.findall(r"btc-updown-15m-(\d+)", text)
+        if matches:
+            all_ts = sorted(set(int(ts) for ts in matches), reverse=True)
+            open_ts = [t for t in all_ts if now_ts < t + BTC_15M_WINDOW]
+            chosen = open_ts[0] if open_ts else all_ts[0]
+            return f"btc-updown-15m-{chosen}"
+        # __NEXT_DATA__
+        m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', text, re.DOTALL)
+        if m:
+            payload = json.loads(m.group(1))
+            queries = (payload.get("props") or {}).get("pageProps", {}).get("dehydratedState", {}).get("queries") or []
+            for q in queries:
+                data = q.get("state", {}).get("data")
+                if not isinstance(data, dict):
+                    continue
+                for ev in (data.get("events") or []) + (data.get("markets") or []):
+                    slug = (ev.get("slug") or "").strip()
+                    if pattern.match(slug):
+                        return slug
+            def find_slugs(obj):
+                if isinstance(obj, dict):
+                    s = obj.get("slug")
+                    if isinstance(s, str) and pattern.match(s):
+                        return [s]
+                    return [x for v in obj.values() for x in find_slugs(v)]
+                if isinstance(obj, list):
+                    return [x for item in obj for x in find_slugs(item)]
+                return []
+            slugs = find_slugs(payload)
+            if slugs:
+                return slugs[0]
+        return None
+    except Exception as e:
+        logger.debug("Page scrape failed: %s", e)
+        return None
+
+
+def get_active_btc_15m_slug() -> str:
     """
     Find the current active BTC 15min market on Polymarket.
-    
-    Searches for markets matching the pattern 'btc-updown-15m-<timestamp>'
-    and returns the slug of the most recent/active market.
+
+    Strategy (aligned with find_bitcoin_15min_market reference):
+    1. Try computed slugs for current/next 15m windows (event URLs btc-updown-15m-{ts_rounded})
+    2. Gamma API (active markets)
+    3. Scrape crypto/15M page
     """
     logger.info("Searching for current BTC 15min market...")
-    
-    try:
-        # Search on Polymarket's crypto 15min page
-        page_url = "https://polymarket.com/crypto/15M"
-        resp = httpx.get(page_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
-        resp.raise_for_status()
-        
-        # Find the BTC market slug in the HTML
-        pattern = r'btc-updown-15m-(\d+)'
-        matches = re.findall(pattern, resp.text)
-        
-        if not matches:
-            raise RuntimeError("No active BTC 15min market found")
-        
-        # Prefer the most recent timestamp that is still OPEN.
-        # 15min markets close 900s after the timestamp in the slug.
-        now_ts = int(datetime.now().timestamp())
-        all_ts = sorted((int(ts) for ts in matches), reverse=True)
-        open_ts = [ts for ts in all_ts if now_ts < (ts + 900)]
-        chosen_ts = open_ts[0] if open_ts else all_ts[0]
-        slug = f"btc-updown-15m-{chosen_ts}"
-        
-        logger.info(f"✅ Market found: {slug}")
+
+    slug = _find_btc_15m_via_computed_slugs()
+    if slug:
+        logger.info("✅ Market found (computed slug): %s", slug)
         return slug
-        
-    except Exception as e:
-        logger.error(f"Error searching for BTC 15min market: {e}")
-        # Fallback: try with the last known one
-        logger.warning("Using default market from configuration...")
-        raise
+
+    slug = _find_btc_15m_via_gamma_api()
+    if slug:
+        logger.info("✅ Market found (Gamma API): %s", slug)
+        return slug
+
+    slug = _find_btc_15m_via_page_scrape()
+    if slug:
+        logger.info("✅ Market found (page scrape): %s", slug)
+        return slug
+
+    raise RuntimeError(
+        "No active BTC 15min market found (tried computed slugs, Gamma API, and crypto/15M page). "
+        "You can set POLYMARKET_MARKET_SLUG in .env to a slug like btc-updown-15m-<timestamp>."
+    )
 
 
-class SimpleArbitrageBot:
-    """Simple bot implementing Jeremy Whittaker's strategy."""
+class Btc15mArbBot:
+    """BTC 15-minute arbitrage bot for Polymarket UP/DOWN markets."""
     
     def __init__(self, settings):
         self.settings = settings
@@ -88,7 +195,7 @@ class SimpleArbitrageBot:
         
         # Try to find current BTC 15min market automatically
         try:
-            market_slug = find_current_btc_15min_market()
+            market_slug = get_active_btc_15m_slug()
         except Exception as e:
             # Fallback: use the slug configured in .env
             if settings.market_slug:
@@ -783,7 +890,7 @@ class SimpleArbitrageBot:
                     # Search for the next market
                     logger.info("\n🔄 Searching for next BTC 15min market...")
                     try:
-                        new_market_slug = find_current_btc_15min_market()
+                        new_market_slug = get_active_btc_15m_slug()
                         if new_market_slug != self.market_slug:
                             logger.info(f"✅ New market found: {new_market_slug}")
                             logger.info("Restarting bot with new market...")
@@ -860,7 +967,7 @@ class SimpleArbitrageBot:
                 self.show_final_summary()
                 logger.info("\n🔄 Searching for next BTC 15min market...")
                 try:
-                    new_market_slug = find_current_btc_15min_market()
+                    new_market_slug = get_active_btc_15m_slug()
                     if new_market_slug != self.market_slug:
                         logger.info(f"✅ New market found: {new_market_slug}")
                         logger.info("Restarting bot with new market...")
@@ -905,7 +1012,7 @@ class SimpleArbitrageBot:
                         # Roll over to next market
                         logger.info("\n🔄 Searching for next BTC 15min market...")
                         try:
-                            new_market_slug = find_current_btc_15min_market()
+                            new_market_slug = get_active_btc_15m_slug()
                             if new_market_slug != self.market_slug:
                                 logger.info(f"✅ New market found: {new_market_slug}")
                                 logger.info("Restarting bot with new market...")
@@ -999,7 +1106,7 @@ async def main():
     
     # Create and run bot
     try:
-        bot = SimpleArbitrageBot(settings)
+        bot = Btc15mArbBot(settings)
         await bot.monitor(interval_seconds=0)  # Scan continuously
     except Exception as e:
         logger.error(f"❌ Fatal error: {e}", exc_info=True)

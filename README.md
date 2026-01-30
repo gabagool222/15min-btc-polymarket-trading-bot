@@ -1,10 +1,16 @@
-# Bitcoin 15min Arbitrage Bot - Polymarket
+# BTC 15-Minute Arbitrage Bot (Polymarket)
 
-Simple arbitrage bot implementing **Jeremy Whittaker's strategy** for Bitcoin 15-minute markets on Polymarket.
+Automated arbitrage bot for **Bitcoin 15-minute UP/DOWN markets** on Polymarket. Buy both sides when total cost &lt; $1.00 to lock in profit regardless of outcome.
+
+**📖 Documentation**
+- **[Strategy explained](docs/STRATEGY.md)** — How the arbitrage works and why it’s profitable.
+- **[User guide (no coding)](docs/USER_GUIDE.md)** — Step-by-step setup and running the bot.
+
+**📌 Note:** This repo is the **original / v1** bot. A **Version 2** exists that follows the **gabagool22** strategy — ask for details if interested.
 
 ## 🎯 Strategy
 
-**Pure arbitrage**: Buy both sides (UP + DOWN) when total cost < $1.00 to guarantee profit regardless of outcome.
+**Pure arbitrage**: Buy both sides (UP + DOWN) when total cost &lt; $1.00 to guarantee profit regardless of outcome.
 
 ### Example:
 ```
@@ -59,9 +65,9 @@ Then configure each variable (see detailed explanation below).
 | Variable | Description | How to Get It |
 |----------|-------------|---------------|
 | `POLYMARKET_PRIVATE_KEY` | Your wallet's private key (starts with `0x`) | Export from your wallet (MetaMask, etc.) or use the one linked to your Polymarket account |
-| `POLYMARKET_API_KEY` | API key for Polymarket CLOB | Run `python -m src.generate_api_key` |
-| `POLYMARKET_API_SECRET` | API secret for Polymarket CLOB | Run `python -m src.generate_api_key` |
-| `POLYMARKET_API_PASSPHRASE` | API passphrase for Polymarket CLOB | Run `python -m src.generate_api_key` |
+| `POLYMARKET_API_KEY` | API key for Polymarket CLOB | Run `python -m src.create_api_keys` |
+| `POLYMARKET_API_SECRET` | API secret for Polymarket CLOB | Run `python -m src.create_api_keys` |
+| `POLYMARKET_API_PASSPHRASE` | API passphrase for Polymarket CLOB | Run `python -m src.create_api_keys` |
 
 ### Wallet Configuration
 
@@ -84,7 +90,7 @@ If you use **email login** on Polymarket (Magic.link), you have **two addresses*
 
 **Common mistake:** Setting `POLYMARKET_FUNDER` to your Polygon wallet address (where you might have USDC on-chain) instead of the Polymarket proxy address. This causes `"invalid signature"` errors.
 
-**How to verify:** Run `python -m src.test_balance`:
+**How to verify:** Run `python -m src.check_balance`:
 - "Getting USDC balance" shows the balance via Polymarket API (should show your funds)
 - "Balance on-chain" queries Polygon directly (may show $0 if your funds are in the proxy, which is normal)
 
@@ -123,7 +129,7 @@ POLYMARKET_PRIVATE_KEY=0xYOUR_PRIVATE_KEY_HERE
 ### Step 2: Run the API key generator
 
 ```bash
-python -m src.generate_api_key
+python -m src.create_api_keys
 ```
 
 This will output something like:
@@ -145,12 +151,12 @@ POLYMARKET_API_PASSPHRASE=mypassphrase
 
 ---
 
-## � Diagnosing Configuration Issues
+## � Checking Configuration
 
-If you get `"invalid signature"` errors, run the diagnostic tool:
+If you get `"invalid signature"` errors, run the config check:
 
 ```bash
-python -m src.diagnose_config
+python -m src.check_config
 ```
 
 This will check:
@@ -175,13 +181,13 @@ This is **normal** for Magic.link accounts. Your funds are held in a Polymarket 
 Before trading, verify that your wallet is configured correctly and has funds:
 
 ```bash
-python -m src.test_balance
+python -m src.check_balance
 ```
 
 This will show:
 ```
 ======================================================================
-POLYMARKET BALANCE TEST
+BTC 15M ARB BOT - BALANCE CHECK
 ======================================================================
 Host: https://clob.polymarket.com
 Signature Type: 1
@@ -207,7 +213,7 @@ API Passphrase: ✓
    🔗 Balance on-chain: $25.123456
 
 ======================================================================
-TEST COMPLETED
+BALANCE CHECK COMPLETED
 ======================================================================
 ```
 
@@ -221,7 +227,7 @@ TEST COMPLETED
 
 Make sure `DRY_RUN=true` in `.env`, then:
 ```bash
-python -m src.simple_arb_bot
+python -m src.btc_15m_arb_bot
 ```
 
 The bot will scan for opportunities but won't place real orders.
@@ -247,7 +253,7 @@ Notes on WSS mode:
 Then run the bot the same way:
 
 ```bash
-python -m src.simple_arb_bot
+python -m src.btc_15m_arb_bot
 ```
 
 ### Live trading mode:
@@ -256,7 +262,7 @@ python -m src.simple_arb_bot
 2. Ensure you have USDC in your Polymarket wallet
 3. Run:
 ```bash
-python -m src.simple_arb_bot
+python -m src.btc_15m_arb_bot
 ```
 
 ### Paired execution safety (avoids “one-leg fills”)
@@ -345,17 +351,20 @@ Expected profit:               $0.15 (1.01%)
 ## 📁 Project Structure
 
 ```
-Bot/
+15min-btc-polymarket-trading-bot/
+├── docs/
+│   ├── STRATEGY.md         # Strategy explained in detail
+│   └── USER_GUIDE.md       # Step-by-step guide (no coding)
 ├── src/
-│   ├── simple_arb_bot.py    # Main arbitrage bot
+│   ├── btc_15m_arb_bot.py   # Main arbitrage bot
 │   ├── config.py            # Configuration loader
-│   ├── lookup.py            # Market ID fetcher
+│   ├── market_lookup.py    # Market/slug lookup
 │   ├── trading.py           # Order execution
-│   ├── generate_api_key.py  # API key generator utility
-│   └── test_balance.py      # Balance verification utility
-├── tests/
-│   └── test_state.py        # Unit tests
-├── .env                     # Environment variables (create from .env.example)
+│   ├── wss_market.py       # WebSocket market feed
+│   ├── create_api_keys.py   # API key generator
+│   ├── check_config.py      # Config/wallet check
+│   └── check_balance.py     # Balance check
+├── .env                     # Your credentials (create from .env.example)
 ├── .env.example             # Environment template
 ├── requirements.txt         # Dependencies
 └── README.md                # This file
@@ -378,12 +387,12 @@ Bot/
 
 ### "Invalid signature" error
 - Verify `POLYMARKET_SIGNATURE_TYPE` matches your wallet type
-- Regenerate API credentials with `python -m src.generate_api_key`
+- Regenerate API credentials with `python -m src.create_api_keys`
 
 ### Balance shows $0 but I have funds
 - Check that your private key corresponds to the wallet with funds
 - For Magic.link: the private key is for your EOA, not the proxy wallet
-- Run `python -m src.test_balance` to see your wallet address
+- Run `python -m src.check_balance` to see your wallet address
 
 ### "No active BTC 15min market found"
 - Markets open every 15 minutes; wait for the next one
@@ -394,20 +403,16 @@ Bot/
 
 ## 📚 Resources
 
-- [Jeremy Whittaker's original article](https://jeremywhittaker.com/index.php/2024/09/24/arbitrage-in-polymarket-com/)
+- [Strategy & user guide](docs/) — `docs/STRATEGY.md` and `docs/USER_GUIDE.md`
 - [Polymarket](https://polymarket.com/)
 - [BTC 15min Markets](https://polymarket.com/crypto/15M)
-- [py-clob-client documentation](https://github.com/Polymarket/py-clob-client)
+- [py-clob-client](https://github.com/Polymarket/py-clob-client)
 
 ---
 
-## 💰 Donations
+## 💬 Need help?
 
-If you find this project helpful, consider supporting me with a donation:
-
-- **Bitcoin**: bc1q7g34820ja90aeltmlkc7va04eqk7u0z7830hdt
-- **Ethereum**: 0x2536eF5E8613dec01b7919A6a7933053da027414
-- **PayPal**: https://www.paypal.me/jonmarcos17 
+If you need help with this bot or have questions, reach out on Telegram: **[@jerrix1](https://t.me/jerrix1)**
 
 ---
 

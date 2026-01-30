@@ -1,7 +1,7 @@
-"""Utility to fetch market/token IDs from a Polymarket event slug.
+"""Fetch market and token IDs from a Polymarket event slug.
 
-Parses the event page `https://polymarket.com/event/<slug>` and extracts the
-market id plus clob token ids (order follows outcomes list).
+Parses the event page https://polymarket.com/event/<slug> and returns
+market id and CLOB token ids (order follows outcomes list).
 """
 
 import json
@@ -78,7 +78,7 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) != 2:
-        print("Usage: python -m src.lookup <slug>")
+        print("Usage: python -m src.market_lookup <slug>")
         sys.exit(1)
     info = fetch_market_from_slug(sys.argv[1])
     print(json.dumps(info, indent=2))
