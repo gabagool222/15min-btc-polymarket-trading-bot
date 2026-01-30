@@ -412,7 +412,7 @@ Expected profit:               $0.15 (1.01%)
 
 ## 💬 Need help?
 
-If you need help with this bot or have questions, reach out on Telegram: **[@jerrix1](https://t.me/jerrix1)**
+If you need help with this bot or have questions, reach out on Telegram: **[@gabagool222](https://t.me/gabagool222)**
 
 ---
 
